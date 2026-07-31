@@ -6,10 +6,13 @@ namespace g {
     extern uint64_t ViewMatrixAddr, CameraAddr, PlayerMgr, LocalPlayerPed;
     extern uintptr_t BoneOffset, PedPool, VehPool, ObjPool;
     extern int ScreenW, ScreenH;
-    inline uint64_t Fnv64(const char* str) {
-        uint64_t h = 0xCBF29CE484222325ULL;
-        while (*str) { h ^= (uint64_t)(*str++); h *= 0x100000001B3ULL; }
-        return h;
-    }
+
+    // FNV-1a 64 hash for pool name lookups
+    uint64_t Fnv64(const char* str);
+
+    // Initialize everything after module bases are set
     void InitResolved();
+
+    // Call GetPoolBase(Hash("CPed")) etc.
+    uint64_t GetPoolPtrFromHash(uint64_t hash);
 }

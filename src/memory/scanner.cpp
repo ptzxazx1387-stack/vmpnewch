@@ -69,7 +69,8 @@ uintptr_t ResolvePointer(uintptr_t addr, uintptr_t offset, uintptr_t insn_len) {
 }
 
 uintptr_t GetRelativeAddr(uintptr_t addr, uintptr_t offset) {
-    return ResolvePointer(addr, offset, 4 + offset - 3);
+    // Default 7-byte instruction (mov rax, [rip+disp32] = 48 8B 05 ?? ?? ?? ??)
+    return ResolvePointer(addr, offset, 7);
 }
 
 } // namespace scanner

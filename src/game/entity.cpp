@@ -1,13 +1,13 @@
 #include "entity.h"
 #include "../memory/offsets.h"
 #include "../memory/resolver.h"
-#include <cstring>
 
-// Simple RPM since we're in-process — direct pointer dereference
+// Direct memory access (we're in-process via injection)
 template<typename T>
-T read_mem(uintptr_t addr) { return *(T*)addr; }
+static inline T read_mem(uintptr_t addr) { return *(T*)addr; }
 
-// EntityBase methods
+//=== EntityBase =============================================================
+
 Vec3 EntityBase::GetPos() const {
     return {
         read_mem<float>(addr + offsets::ENTITY_POS_X),
@@ -25,56 +25,66 @@ uint8_t EntityBase::GetType() const {
 }
 
 bool EntityBase::IsValid() const {
-    return addr != 0 && GetHealth() > 0.0f;
+    return addr > 0x1000 && GetHealth() > 0.0f;
 }
 
 Matrix4x4 EntityBase::GetMatrix() const {
     return *(Matrix4x4*)(addr + offsets::ENTITY_MATRIX);
 }
 
-// CPed
+//=== CPed ===================================================================
+
 float CPed::GetArmor() const {
     return read_mem<float>(addr + offsets::ENTITY_ARMOR);
 }
 
 uint64_t CPed::GetWeaponHash() const {
-    // Weapon manager chain: CPed + 0x10A8 → CWeaponManager + 0x50
-    uint64_t weaponMgr = read_mem<uint64_t>(addr + 0x10A8);
-    if (!weaponMgr) return 0;
-    return read_mem<uint32_t>(weaponMgr + 0x50);
+    // Weapon manager chain: CPed + PED_WEAPON_MGR → CWeaponManager → current hash
+    uint64_t wpnMgr = read_mem<uint64_t>(addr + offsets::PED_WEAPON_MGR);
+    if (!wpnMgr || wpnMgr < 0x1000) return 0;
+    return read_mem<uint64_t>(wpnMgr + offsets::WEAPON_MGR_CUR);
 }
 
 Vec3 CPed::GetBonePos(int boneId) const {
-    // Bone data chain: CPed + boneComponent → boneArray[boneId]
+    // Bone chain: CPed + BoneOffset → crSkeleton + 0x20 → BoneEntry[boneId]
     if (!g::BoneOffset) return GetPos();
-    uint64_t boneComp = read_mem<uint64_t>(addr + g::BoneOffset);
-    if (!boneComp) return GetPos();
-    uint64_t boneData = read_mem<uint64_t>(boneComp + 0x20);
-    if (!boneData) return GetPos();
-    // Each bone entry = 4x4 matrix (64 bytes), we take translation column
-    return *(Vec3*)(boneData + boneId * 64 + 16); // column 3 = translation
+
+    uint64_t skel = read_mem<uint64_t>(addr + g::BoneOffset);
+    if (!skel || skel < 0x1000) return GetPos();
+
+    uint64_t boneArr = read_mem<uint64_t>(skel + offsets::BONE_COMP_ARRAY);
+    if (!boneArr || boneArr < 0x1000) return GetPos();
+
+    // Each bone is two 4×4 matrices concatenated (64 bytes each)
+    // First matrix: bone-space transform
+    // Second matrix: world-space bone position starts at boneArr + boneId*BONE_ENTRY_SIZE + 16
+    uintptr_t entry = boneArr + (uintptr_t)boneId * offsets::BONE_ENTRY_SIZE;
+
+    // Translation vector is at +16 (4 floats = x,y,z,w) in the second matrix
+    // First 16 bytes = quaternion/rotation; bytes 16-31 = translation
+    return *(Vec3*)(entry + 16);
 }
 
 bool CPed::IsInVehicle() const {
-    // Check: CPed+some offset has vehicle pointer
-    uint64_t veh = read_mem<uint64_t>(addr + 0xD28);
-    return veh != 0;
+    uint64_t veh = read_mem<uint64_t>(addr + offsets::PED_VEHICLE);
+    return veh > 0x1000;
 }
 
 uint64_t CPed::GetVehicle() const {
-    return read_mem<uint64_t>(addr + 0xD28);
+    return read_mem<uint64_t>(addr + offsets::PED_VEHICLE);
 }
 
-// Vehicle
+//=== Vehicle ================================================================
+
 float Vehicle::GetSpeed() const {
-    Vec3 vel = *(Vec3*)(addr + 0x320);
-    return vel.length(); // m/s, ~3.6 * = km/h
+    Vec3 vel = *(Vec3*)(addr + offsets::VEH_VELOCITY);
+    return vel.length();
 }
 
 int Vehicle::GetNumPassengers() const {
-    return read_mem<int>(addr + 0x4B8);
+    return read_mem<int>(addr + offsets::VEH_PASSENGERS);
 }
 
 uint64_t Vehicle::GetDriver() const {
-    return read_mem<uint64_t>(addr + 0x4B0);
+    return read_mem<uint64_t>(addr + offsets::VEH_DRIVER);
 }
