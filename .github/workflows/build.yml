@@ -1,0 +1,19 @@
+name: Build VMP Cheat
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: git clone --depth 1 https://github.com/ocornut/imgui.git vendor/imgui
+      - run: git clone --depth 1 https://github.com/tsudakageyu/minhook.git vendor/minhook
+      - run: echo "kiero.h vendored in repo — no external download needed"
+      - run: cmake -B build
+      - run: cmake --build build --config Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vmp_cheat
+          path: |
+            build/Release/vmp_cheat.dll
+            build/Release/injector.exe
