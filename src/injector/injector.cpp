@@ -4,32 +4,39 @@
 #include <cstring>
 #include <cstdlib>
 
-static DWORD FindProcessId(const wchar_t* name) {
-	DWORD pid = 0;
+// Find ANY process that has gta-core-five.dll loaded.
+// Avoids hardcoded process names like VMP_b3258_GameProcess.exe
+static DWORD FindGameProcess() {
 	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (snap == INVALID_HANDLE_VALUE) return 0;
+
+	DWORD result = 0;
 	PROCESSENTRY32W pe = { sizeof(pe) };
 	if (Process32FirstW(snap, &pe)) {
 		do {
-			if (_wcsicmp(pe.szExeFile, name) == 0) { pid = pe.th32ProcessID; break; }
+			if (pe.th32ProcessID == 0) continue;
+			// Skip small / system processes to save time
+			if (pe.cntThreads < 5) continue;
+
+			// Check if this process has gta-core-five.dll loaded
+			HANDLE modSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pe.th32ProcessID);
+			if (modSnap == INVALID_HANDLE_VALUE) continue;
+
+			MODULEENTRY32W me = { sizeof(me) };
+			if (Module32FirstW(modSnap, &me)) {
+				do {
+					if (_wcsicmp(me.szModule, L"gta-core-five.dll") == 0) {
+						result = pe.th32ProcessID;
+						break;
+					}
+				} while (Module32NextW(modSnap, &me));
+			}
+			CloseHandle(modSnap);
+			if (result) break;
 		} while (Process32NextW(snap, &pe));
 	}
 	CloseHandle(snap);
-	return pid;
-}
-
-static bool ModuleExists(DWORD pid, const wchar_t* modName) {
-	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
-	if (snap == INVALID_HANDLE_VALUE) return false;
-	MODULEENTRY32W me = { sizeof(me) };
-	bool found = false;
-	if (Module32FirstW(snap, &me)) {
-		do {
-			if (_wcsicmp(me.szModule, modName) == 0) { found = true; break; }
-		} while (Module32NextW(snap, &me));
-	}
-	CloseHandle(snap);
-	return found;
+	return result;
 }
 
 static bool InjectDLL(DWORD pid, const char* dllPath) {
@@ -88,22 +95,21 @@ int main(int argc, char** argv) {
 	}
 	printf("[*] DLL: %s\n\n", dllPath);
 
-	// VMP launcher (VMP.exe) does NOT load gta-core-five.dll.
-	// We must find the GTA child process which actually holds the DLL.
-	printf("[*] Scanning for game process with gta-core-five.dll...\n");
-	const wchar_t* names[] = { L"GTA5.exe", L"FiveM_GTAProcess.exe", L"FiveM.exe", L"VMP.exe" };
+	// Scan EVERY process for one that has gta-core-five.dll loaded.
+	// VMP uses custom process names like "VMP_b3258_GameProcess.exe"
+	// so hardcoding names doesn't work.
+	printf("[*] Searching for game process with gta-core-five.dll...\n");
+	printf("    (This may take a few seconds)\n");
+
 	DWORD pid = 0;
 	while (!pid) {
-		for (auto& n : names) {
-			DWORD candidate = FindProcessId(n);
-			if (candidate && ModuleExists(candidate, L"gta-core-five.dll")) {
-				pid = candidate;
-				break;
-			}
+		pid = FindGameProcess();
+		if (!pid) {
+			printf("    .\n");
+			Sleep(2000);
 		}
-		if (!pid) Sleep(1000);
 	}
-	printf("[+] Game PID=%lu  (gta-core-five.dll already present)\n", pid);
+	printf("[+] Game PID=%lu  (gta-core-five.dll found)\n", pid);
 
 	bool ok = InjectDLL(pid, dllPath);
 	printf(ok ? "[+] SUCCESS! Press INSERT in-game to open menu.\n" : "[!] Injection FAILED.\n");
