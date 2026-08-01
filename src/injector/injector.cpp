@@ -2,6 +2,7 @@
 #include <TlHelp32.h>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 static DWORD FindProcessId(const wchar_t* name) {
     DWORD pid = 0;
